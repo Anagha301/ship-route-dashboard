@@ -1,24 +1,31 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
+from geopy.geocoders import Nominatim
+import time
 
 st.set_page_config(layout="wide")
 
 st.title("🚢 Ship Route Dashboard")
 
-# Load Excel
+# ----------------------------
+# Load Data
+# ----------------------------
+
 df = pd.read_excel("ships.xlsx")
 
-# Clean dates
 df["Arrival"] = pd.to_datetime(df["Arrival"], errors="coerce")
 df["Departure"] = pd.to_datetime(df["Departure"], errors="coerce")
 
 df = df.dropna(subset=["Arrival"])
 
-df["Port"] = df["Port"].str.strip()
-df["Country"] = df["Country"].str.strip()
+df["Port"] = df["Port"].astype(str).str.strip()
+df["Country"] = df["Country"].astype(str).str.strip()
 
-# Ship selector
+# ----------------------------
+# Ship Selector
+# ----------------------------
+
 ship = st.sidebar.selectbox(
     "Select Ship",
     sorted(df["Ship Name"].unique())
@@ -29,32 +36,48 @@ ship_data = df[df["Ship Name"] == ship].sort_values("Arrival")
 st.subheader("Voyage Timeline")
 st.dataframe(ship_data)
 
-# --------------------------------------------------
-# Port coordinates (stable for cloud deployment)
-# --------------------------------------------------
+# ----------------------------
+# Geocode All Ports Automatically
+# ----------------------------
 
-port_coords = {
-    "Houston": (29.73, -95.26),
-    "Cartagena": (10.39, -75.52),
-    "Suape": (-8.39, -34.96),
-    "Santos": (-23.95, -46.33),
-    "Buenos Aires": (-34.61, -58.37),
-    "Montevideo": (-34.90, -56.16),
-    "Itajaí": (-26.91, -48.66),
-    "Paranaguá": (-25.51, -48.51),
-    "Tanjung Pelepas": (1.36, 103.53),
-    "Brisbane": (-27.38, 153.17),
-    "Singapore": (1.26, 103.84),
-    "Walvis Bay": (-22.95, 14.51),
-    "Mobile": (30.69, -88.04),
-    "Los Angeles": (33.74, -118.27)
-}
+@st.cache_data
+def get_port_coordinates(ports):
+
+    geolocator = Nominatim(user_agent="ship_route_dashboard")
+
+    coords = {}
+
+    for port in ports:
+
+        try:
+            location = geolocator.geocode(port + " port")
+
+            if location:
+                coords[port] = (location.latitude, location.longitude)
+
+            time.sleep(1)
+
+        except:
+            pass
+
+    return coords
+
+
+all_ports = df["Port"].unique()
+port_coords = get_port_coordinates(all_ports)
+
+# ----------------------------
+# Build Map Data
+# ----------------------------
 
 coords = []
 
 for port in ship_data["Port"]:
+
     if port in port_coords:
+
         lat, lon = port_coords[port]
+
         coords.append({
             "port": port,
             "lat": lat,
@@ -63,13 +86,13 @@ for port in ship_data["Port"]:
 
 map_df = pd.DataFrame(coords)
 
-# --------------------------------------------------
-# Map
-# --------------------------------------------------
+# ----------------------------
+# Map Visualization
+# ----------------------------
 
 if not map_df.empty:
 
-    ports = pdk.Layer(
+    ports_layer = pdk.Layer(
         "ScatterplotLayer",
         data=map_df,
         get_position='[lon, lat]',
@@ -77,7 +100,7 @@ if not map_df.empty:
         get_radius=70000,
     )
 
-    route = pdk.Layer(
+    route_layer = pdk.Layer(
         "PathLayer",
         data=[{
             "path": map_df[["lon","lat"]].values.tolist()
@@ -96,7 +119,7 @@ if not map_df.empty:
     )
 
     deck = pdk.Deck(
-        layers=[route, ports],
+        layers=[route_layer, ports_layer],
         initial_view_state=view,
         tooltip={"text": "{port}"}
     )
@@ -105,4 +128,4 @@ if not map_df.empty:
     st.pydeck_chart(deck)
 
 else:
-    st.warning("No matching ports found in coordinate database.")
+    st.warning("No coordinates found for ports.")
