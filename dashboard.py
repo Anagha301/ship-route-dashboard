@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
+from geopy.geocoders import Nominatim
 
 st.set_page_config(layout="wide")
 
@@ -17,10 +18,11 @@ df["Departure"] = pd.to_datetime(df["Departure"], errors="coerce")
 
 df = df.dropna(subset=["Arrival"])
 
-df["Port"] = df["Port"].str.strip()
+df["Port"] = df["Port"].astype(str).str.strip()
+df["Country"] = df["Country"].astype(str).str.strip()
 
 # -----------------------------
-# Ship selector
+# Ship Filter
 # -----------------------------
 
 ship = st.sidebar.selectbox(
@@ -34,35 +36,48 @@ st.subheader("Voyage Timeline")
 st.dataframe(ship_data)
 
 # -----------------------------
-# Automatic Port Coordinates
+# Geocoder (cached)
 # -----------------------------
 
-# Simple deterministic coordinates based on hash
-# (fast and works for all ports)
+@st.cache_data
+def get_coordinates(port, country):
 
-def generate_coordinates(port):
+    geolocator = Nominatim(user_agent="ship_dashboard")
 
-    import hashlib
+    try:
+        # Try port + country
+        location = geolocator.geocode(f"{port} port {country}")
 
-    h = int(hashlib.md5(port.encode()).hexdigest(),16)
+        if location:
+            return location.latitude, location.longitude
 
-    lat = (h % 180) - 90
-    lon = ((h // 1000) % 360) - 180
+        # fallback to country center
+        location = geolocator.geocode(country)
 
-    return lat, lon
+        if location:
+            return location.latitude, location.longitude
+
+    except:
+        pass
+
+    return None
 
 
 coords = []
 
-for port in ship_data["Port"]:
+for _, row in ship_data.iterrows():
 
-    lat, lon = generate_coordinates(port)
+    result = get_coordinates(row["Port"], row["Country"])
 
-    coords.append({
-        "port": port,
-        "lat": lat,
-        "lon": lon
-    })
+    if result:
+        lat, lon = result
+
+        coords.append({
+            "port": row["Port"],
+            "lat": lat,
+            "lon": lon
+        })
+
 
 map_df = pd.DataFrame(coords)
 
@@ -70,37 +85,42 @@ map_df = pd.DataFrame(coords)
 # Map
 # -----------------------------
 
-ports = pdk.Layer(
-    "ScatterplotLayer",
-    data=map_df,
-    get_position='[lon, lat]',
-    get_color='[255,0,0]',
-    get_radius=70000
-)
+if not map_df.empty:
 
-route = pdk.Layer(
-    "PathLayer",
-    data=[{
-        "path": map_df[["lon","lat"]].values.tolist()
-    }],
-    get_path="path",
-    get_color="[0,0,255]",
-    width_scale=20,
-    width_min_pixels=4
-)
+    ports = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_df,
+        get_position='[lon, lat]',
+        get_color='[255,0,0]',
+        get_radius=60000,
+    )
 
-view = pdk.ViewState(
-    latitude=map_df["lat"].mean(),
-    longitude=map_df["lon"].mean(),
-    zoom=2,
-    pitch=30
-)
+    route = pdk.Layer(
+        "PathLayer",
+        data=[{
+            "path": map_df[["lon","lat"]].values.tolist()
+        }],
+        get_path="path",
+        get_color="[0,0,255]",
+        width_scale=20,
+        width_min_pixels=4,
+    )
 
-deck = pdk.Deck(
-    layers=[route, ports],
-    initial_view_state=view,
-    tooltip={"text": "{port}"}
-)
+    view = pdk.ViewState(
+        latitude=map_df["lat"].mean(),
+        longitude=map_df["lon"].mean(),
+        zoom=2,
+        pitch=30
+    )
 
-st.subheader("🌍 Ship Route Map")
-st.pydeck_chart(deck)
+    deck = pdk.Deck(
+        layers=[route, ports],
+        initial_view_state=view,
+        tooltip={"text": "{port}"}
+    )
+
+    st.subheader("🌍 Ship Route Map")
+    st.pydeck_chart(deck)
+
+else:
+    st.warning("No coordinates found.")
