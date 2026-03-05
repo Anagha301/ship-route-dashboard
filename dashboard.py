@@ -42,13 +42,22 @@ geolocator = Nominatim(user_agent="ship_routes")
 
 @lru_cache(maxsize=500)
 def get_coords(port, country):
+    """Try multiple geocoding patterns for better accuracy."""
     try:
-        location = geolocator.geocode(f"{port}, {country}")
-        if location:
-            return location.latitude, location.longitude
+        queries = [
+            f"{port} Port, {country}",
+            f"{port} Harbour, {country}",
+            f"{port}, {country}",
+            f"{port}"
+        ]
+        for q in queries:
+            loc = geolocator.geocode(q, timeout=10)
+            if loc:
+                return loc.latitude, loc.longitude
     except:
         return None, None
     return None, None
+
 
 coords = []
 
@@ -65,6 +74,14 @@ for _, row in ship_data.iterrows():
 map_df = pd.DataFrame(coords)
 
 # -------------------------
+# Prevent crash if no coordinates
+# -------------------------
+
+if map_df.empty:
+    st.error("No valid coordinates found for this ship's ports. Check port names or geocoding.")
+    st.stop()
+
+# -------------------------
 # Create curved sea route arcs
 # -------------------------
 
@@ -77,9 +94,10 @@ def create_arc(p1, p2, steps=50):
 
     arc = []
     for i in range(steps):
-        height = np.sin(np.pi * i / (steps - 1)) * 3  # smooth sea arc
+        height = np.sin(np.pi * i / (steps - 1)) * 3
         arc.append([lons[i], lats[i] + height])
     return arc
+
 
 paths = []
 
