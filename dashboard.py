@@ -5,7 +5,7 @@ import numpy as np
 import math
 
 st.set_page_config(layout="wide")
-st.title("🚢 Global Ship Route Dashboard (Curved Sea Routes)")
+st.title("🚢 Global Ship Route Dashboard (Ocean‑Only Curved Routes)")
 
 # -------------------------
 # Load Data
@@ -120,29 +120,33 @@ port_coords = {
 }
 
 # -------------------------
-# Optional mid‑ocean waypoints to avoid land
+# Ocean waypoints to avoid land
 # -------------------------
-# Key: (origin_country, destination_country) or (origin_port, destination_port)
-# Value: list of (lat, lon) waypoints over the ocean
 
 ocean_waypoints = {
-    # Example: South America → East Asia via South Atlantic + Indian Ocean
     ("Brazil", "China"): [
-        (-30.0, -10.0),   # South Atlantic mid‑ocean
-        (-35.0, 20.0),    # off South Africa
-        (-25.0, 70.0),    # mid‑Indian Ocean
+        (-30, -10),
+        (-35, 20),
+        (-25, 70),
     ],
     ("Argentina", "China"): [
-        (-40.0, -20.0),
-        (-35.0, 20.0),
-        (-25.0, 70.0),
+        (-40, -20),
+        (-35, 20),
+        (-25, 70),
     ],
-    # You can add more pairs here as you see issues
-    # e.g. ("Brazil", "India"), ("USA", "China"), etc.
+    ("Brazil", "India"): [
+        (-25, -15),
+        (-30, 20),
+        (-20, 60),
+    ],
+    ("Europe", "China"): [
+        (30, 20),
+        (10, 60),
+    ],
 }
 
 # -------------------------
-# Great‑circle arc
+# Great-circle arc
 # -------------------------
 
 def great_circle_arc(p1, p2, steps=80):
@@ -210,12 +214,8 @@ for _, row in ship_data.iterrows():
 
 map_df = pd.DataFrame(coords)
 
-if map_df.empty:
-    st.error("No coordinates found for this ship.")
-    st.stop()
-
 # -------------------------
-# Build paths with optional ocean waypoints
+# Build paths with ocean waypoints
 # -------------------------
 
 paths = []
@@ -229,23 +229,15 @@ for i in range(len(map_df) - 1):
 
     c1 = row1["country"]
     c2 = row2["country"]
-    port1 = row1["port"]
-    port2 = row2["port"]
 
-    # Try port‑pair waypoints first, then country‑pair
-    wp = None
-    if (port1, port2) in ocean_waypoints:
-        wp = ocean_waypoints[(port1, port2)]
-    elif (c1, c2) in ocean_waypoints:
-        wp = ocean_waypoints[(c1, c2)]
+    wp = ocean_waypoints.get((c1, c2), None)
 
     full_path = []
 
     if wp:
-        # Build segments: p1 -> wp1 -> wp2 -> ... -> p2
-        points = [p1] + wp + [p2]
-        for j in range(len(points) - 1):
-            seg = great_circle_arc(points[j], points[j+1])
+        pts = [p1] + wp + [p2]
+        for j in range(len(pts) - 1):
+            seg = great_circle_arc(pts[j], pts[j+1])
             if j > 0:
                 seg = seg[1:]
             full_path.extend(seg)
@@ -299,5 +291,5 @@ deck = pdk.Deck(
     tooltip={"text": "{port}, {country}"}
 )
 
-st.subheader("🌍 Ship Route Map (Curved Sea Routes)")
+st.subheader("🌍 Ship Route Map (Ocean‑Only Curved Routes)")
 st.pydeck_chart(deck)
