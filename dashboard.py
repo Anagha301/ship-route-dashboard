@@ -5,7 +5,7 @@ import numpy as np
 import math
 
 st.set_page_config(layout="wide")
-st.title("🚢 Global Ship Route Dashboard (Ocean‑Curved Routes)")
+st.title("🚢 Global Ship Route Dashboard (Curved Sea Routes)")
 
 # -------------------------
 # Load Data
@@ -120,6 +120,63 @@ port_coords = {
 }
 
 # -------------------------
+# Optional mid‑ocean waypoints to avoid land
+# -------------------------
+# Key: (origin_country, destination_country) or (origin_port, destination_port)
+# Value: list of (lat, lon) waypoints over the ocean
+
+ocean_waypoints = {
+    # Example: South America → East Asia via South Atlantic + Indian Ocean
+    ("Brazil", "China"): [
+        (-30.0, -10.0),   # South Atlantic mid‑ocean
+        (-35.0, 20.0),    # off South Africa
+        (-25.0, 70.0),    # mid‑Indian Ocean
+    ],
+    ("Argentina", "China"): [
+        (-40.0, -20.0),
+        (-35.0, 20.0),
+        (-25.0, 70.0),
+    ],
+    # You can add more pairs here as you see issues
+    # e.g. ("Brazil", "India"), ("USA", "China"), etc.
+}
+
+# -------------------------
+# Great‑circle arc
+# -------------------------
+
+def great_circle_arc(p1, p2, steps=80):
+    lat1, lon1 = map(math.radians, p1)
+    lat2, lon2 = map(math.radians, p2)
+
+    d = 2 * math.asin(
+        math.sqrt(
+            math.sin((lat2 - lat1) / 2)**2 +
+            math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2)**2
+        )
+    )
+
+    if d == 0:
+        return [[math.degrees(lon1), math.degrees(lat1)]]
+
+    arc = []
+    for i in range(steps):
+        f = i / (steps - 1)
+        A = math.sin((1 - f) * d) / math.sin(d)
+        B = math.sin(f * d) / math.sin(d)
+
+        x = A * math.cos(lat1) * math.cos(lon1) + B * math.cos(lat2) * math.cos(lon2)
+        y = A * math.cos(lat1) * math.sin(lon1) + B * math.cos(lat2) * math.sin(lon2)
+        z = A * math.sin(lat1) + B * math.sin(lat2)
+
+        lat = math.atan2(z, math.sqrt(x * x + y * y))
+        lon = math.atan2(y, x)
+
+        arc.append([math.degrees(lon), math.degrees(lat)])
+
+    return arc
+
+# -------------------------
 # Ship selector
 # -------------------------
 
@@ -158,43 +215,44 @@ if map_df.empty:
     st.stop()
 
 # -------------------------
-# Ocean‑curved arc generator
-# -------------------------
-
-def ocean_curve(p1, p2, steps=80):
-    lat1, lon1 = p1
-    lat2, lon2 = p2
-
-    lats = np.linspace(lat1, lat2, steps)
-    lons = np.linspace(lon1, lon2, steps)
-
-    # Force curve outward toward ocean (west for Atlantic, east for Pacific)
-    mid_lat = (lat1 + lat2) / 2
-    mid_lon = (lon1 + lon2) / 2
-
-    curve_strength = 10  # adjust curvature
-
-    if lon1 < lon2:
-        bend = -curve_strength
-    else:
-        bend = curve_strength
-
-    arc = []
-    for i in range(steps):
-        offset = math.sin(math.pi * i / (steps - 1)) * bend
-        arc.append([lons[i] + offset, lats[i]])
-
-    return arc
-
-# -------------------------
-# Build paths
+# Build paths with optional ocean waypoints
 # -------------------------
 
 paths = []
+
 for i in range(len(map_df) - 1):
-    p1 = (map_df.iloc[i]["lat"], map_df.iloc[i]["lon"])
-    p2 = (map_df.iloc[i+1]["lat"], map_df.iloc[i+1]["lon"])
-    paths.append({"path": ocean_curve(p1, p2)})
+    row1 = map_df.iloc[i]
+    row2 = map_df.iloc[i+1]
+
+    p1 = (row1["lat"], row1["lon"])
+    p2 = (row2["lat"], row2["lon"])
+
+    c1 = row1["country"]
+    c2 = row2["country"]
+    port1 = row1["port"]
+    port2 = row2["port"]
+
+    # Try port‑pair waypoints first, then country‑pair
+    wp = None
+    if (port1, port2) in ocean_waypoints:
+        wp = ocean_waypoints[(port1, port2)]
+    elif (c1, c2) in ocean_waypoints:
+        wp = ocean_waypoints[(c1, c2)]
+
+    full_path = []
+
+    if wp:
+        # Build segments: p1 -> wp1 -> wp2 -> ... -> p2
+        points = [p1] + wp + [p2]
+        for j in range(len(points) - 1):
+            seg = great_circle_arc(points[j], points[j+1])
+            if j > 0:
+                seg = seg[1:]
+            full_path.extend(seg)
+    else:
+        full_path = great_circle_arc(p1, p2)
+
+    paths.append({"path": full_path})
 
 # -------------------------
 # Satellite map layer
@@ -241,5 +299,5 @@ deck = pdk.Deck(
     tooltip={"text": "{port}, {country}"}
 )
 
-st.subheader("🌍 Ship Route Map (Ocean‑Curved)")
+st.subheader("🌍 Ship Route Map (Curved Sea Routes)")
 st.pydeck_chart(deck)
