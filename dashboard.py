@@ -3,16 +3,17 @@ import pandas as pd
 import pydeck as pdk
 import numpy as np
 import math
+import networkx as nx
+import json
 
 st.set_page_config(layout="wide")
-st.title("🚢 Global Ship Route Dashboard")
+st.title("🚢 Global Ship Route Dashboard (Ocean‑Only Routing)")
 
 # -------------------------
-# Load Data (use Sheet2)
+# Load Data
 # -------------------------
 
 df = pd.read_excel("ships.xlsx", sheet_name="Sheet2")
-
 df["Arrival"] = pd.to_datetime(df["Arrival"], errors="coerce")
 df = df.dropna(subset=["Arrival"])
 
@@ -21,7 +22,32 @@ df["Port"] = df["Port"].astype(str).str.strip()
 df["Country"] = df["Country"].astype(str).str.strip()
 
 # -------------------------
-# Country fallback coordinates
+# Load ocean routing graph
+# -------------------------
+
+with open("ocean_routes.json", "r") as f:
+    ocean_graph_data = json.load(f)
+
+G = nx.node_link_graph(ocean_graph_data)
+
+def nearest_ocean_node(lat, lon):
+    best = None
+    best_dist = 999999
+    for node, data in G.nodes(data=True):
+        d = (lat - data["lat"])**2 + (lon - data["lon"])**2
+        if d < best_dist:
+            best_dist = d
+            best = node
+    return best
+
+def ocean_route(p1, p2):
+    n1 = nearest_ocean_node(p1[0], p1[1])
+    n2 = nearest_ocean_node(p2[0], p2[1])
+    path = nx.shortest_path(G, n1, n2, weight="dist")
+    return [[G.nodes[n]["lon"], G.nodes[n]["lat"]] for n in path]
+
+# -------------------------
+# Coordinates
 # -------------------------
 
 country_coords = {
@@ -41,8 +67,6 @@ country_coords = {
     "Malaysia": (4.21, 101.97),
     "Vietnam": (14.06, 108.28),
     "China": (35.86, 104.20),
-    "Korea": (36.50, 127.80),
-    "S Korea": (36.50, 127.80),
     "South Korea": (36.50, 127.80),
     "Japan": (36.20, 138.25),
     "Sri Lanka": (7.87, 80.77),
@@ -59,24 +83,9 @@ country_coords = {
     "Netherlands": (52.13, 5.29),
     "Belgium": (50.50, 4.47),
     "UK": (55.38, -3.44),
-    "United Kingdom": (55.38, -3.44),
     "Denmark": (56.26, 9.50),
     "Sweden": (60.13, 18.64),
-    "Lithuania": (55.17, 23.88),
-    "Poland": (51.92, 19.15),
-    "Benin": (9.31, 2.32),
-    "Togo": (8.62, 0.82),
-    "Ivory Coast": (7.54, -5.55),
-    "Guatemala": (15.78, -90.23),
-    "Peru": (-9.19, -75.02),
-    "Unknown": (0.0, 0.0),
-    "(Uncertain)": (0.0, 0.0),
-    "": (0.0, 0.0),
 }
-
-# -------------------------
-# Port coordinates (main ports)
-# -------------------------
 
 port_coords = {
     "Houston": (29.73, -95.27),
@@ -176,49 +185,15 @@ if map_df.empty:
     st.stop()
 
 # -------------------------
-# Great-circle arc generator
-# -------------------------
-
-def great_circle_arc(p1, p2, steps=100):
-    lat1, lon1 = map(math.radians, p1)
-    lat2, lon2 = map(math.radians, p2)
-
-    d = 2 * math.asin(
-        math.sqrt(
-            math.sin((lat2 - lat1) / 2)**2 +
-            math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2)**2
-        )
-    )
-
-    if d == 0:
-        return [[math.degrees(lon1), math.degrees(lat1)]]
-
-    arc = []
-    for i in range(steps):
-        f = i / (steps - 1)
-        A = math.sin((1 - f) * d) / math.sin(d)
-        B = math.sin(f * d) / math.sin(d)
-
-        x = A * math.cos(lat1) * math.cos(lon1) + B * math.cos(lat2) * math.cos(lon2)
-        y = A * math.cos(lat1) * math.sin(lon1) + B * math.cos(lat2) * math.sin(lon2)
-        z = A * math.sin(lat1) + B * math.sin(lat2)
-
-        lat = math.atan2(z, math.sqrt(x * x + y * y))
-        lon = math.atan2(y, x)
-
-        arc.append([math.degrees(lon), math.degrees(lat)])
-
-    return arc
-
-# -------------------------
-# Build route paths
+# Build ocean‑only paths
 # -------------------------
 
 paths = []
 for i in range(len(map_df) - 1):
     p1 = (map_df.iloc[i]["lat"], map_df.iloc[i]["lon"])
     p2 = (map_df.iloc[i+1]["lat"], map_df.iloc[i+1]["lon"])
-    paths.append({"path": great_circle_arc(p1, p2)})
+    ocean_path = ocean_route(p1, p2)
+    paths.append({"path": ocean_path})
 
 # -------------------------
 # Satellite map layer
@@ -265,5 +240,5 @@ deck = pdk.Deck(
     tooltip={"text": "{port}, {country}"}
 )
 
-st.subheader("🌍 Ship Route Map")
+st.subheader("🌍 Ship Route Map (Ocean‑Only)")
 st.pydeck_chart(deck)
