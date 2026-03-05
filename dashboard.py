@@ -3,11 +3,9 @@ import pandas as pd
 import pydeck as pdk
 import numpy as np
 import math
-import networkx as nx
-import json
 
 st.set_page_config(layout="wide")
-st.title("🚢 Global Ship Route Dashboard (Ocean‑Only Routing)")
+st.title("🚢 Global Ship Route Dashboard (Ocean‑Curved Routes)")
 
 # -------------------------
 # Load Data
@@ -20,31 +18,6 @@ df = df.dropna(subset=["Arrival"])
 df["Ship Name"] = df["Ship Name"].astype(str).str.strip()
 df["Port"] = df["Port"].astype(str).str.strip()
 df["Country"] = df["Country"].astype(str).str.strip()
-
-# -------------------------
-# Load ocean routing graph
-# -------------------------
-
-with open("ocean_routes.json", "r") as f:
-    ocean_graph_data = json.load(f)
-
-G = nx.node_link_graph(ocean_graph_data)
-
-def nearest_ocean_node(lat, lon):
-    best = None
-    best_dist = 999999
-    for node, data in G.nodes(data=True):
-        d = (lat - data["lat"])**2 + (lon - data["lon"])**2
-        if d < best_dist:
-            best_dist = d
-            best = node
-    return best
-
-def ocean_route(p1, p2):
-    n1 = nearest_ocean_node(p1[0], p1[1])
-    n2 = nearest_ocean_node(p2[0], p2[1])
-    path = nx.shortest_path(G, n1, n2, weight="dist")
-    return [[G.nodes[n]["lon"], G.nodes[n]["lat"]] for n in path]
 
 # -------------------------
 # Coordinates
@@ -185,15 +158,43 @@ if map_df.empty:
     st.stop()
 
 # -------------------------
-# Build ocean‑only paths
+# Ocean‑curved arc generator
+# -------------------------
+
+def ocean_curve(p1, p2, steps=80):
+    lat1, lon1 = p1
+    lat2, lon2 = p2
+
+    lats = np.linspace(lat1, lat2, steps)
+    lons = np.linspace(lon1, lon2, steps)
+
+    # Force curve outward toward ocean (west for Atlantic, east for Pacific)
+    mid_lat = (lat1 + lat2) / 2
+    mid_lon = (lon1 + lon2) / 2
+
+    curve_strength = 10  # adjust curvature
+
+    if lon1 < lon2:
+        bend = -curve_strength
+    else:
+        bend = curve_strength
+
+    arc = []
+    for i in range(steps):
+        offset = math.sin(math.pi * i / (steps - 1)) * bend
+        arc.append([lons[i] + offset, lats[i]])
+
+    return arc
+
+# -------------------------
+# Build paths
 # -------------------------
 
 paths = []
 for i in range(len(map_df) - 1):
     p1 = (map_df.iloc[i]["lat"], map_df.iloc[i]["lon"])
     p2 = (map_df.iloc[i+1]["lat"], map_df.iloc[i+1]["lon"])
-    ocean_path = ocean_route(p1, p2)
-    paths.append({"path": ocean_path})
+    paths.append({"path": ocean_curve(p1, p2)})
 
 # -------------------------
 # Satellite map layer
@@ -240,5 +241,5 @@ deck = pdk.Deck(
     tooltip={"text": "{port}, {country}"}
 )
 
-st.subheader("🌍 Ship Route Map (Ocean‑Only)")
+st.subheader("🌍 Ship Route Map (Ocean‑Curved)")
 st.pydeck_chart(deck)
