@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import pydeck as pdk
 import numpy as np
+import math
 
 st.set_page_config(layout="wide")
 st.title("🚢 Global Ship Route Dashboard")
@@ -20,7 +21,7 @@ df["Port"] = df["Port"].astype(str).str.strip()
 df["Country"] = df["Country"].astype(str).str.strip()
 
 # -------------------------
-# Static coordinates
+# Country fallback coordinates
 # -------------------------
 
 country_coords = {
@@ -73,7 +74,10 @@ country_coords = {
     "": (0.0, 0.0),
 }
 
-# Port coordinates (minimal set)
+# -------------------------
+# Port coordinates (main ports)
+# -------------------------
+
 port_coords = {
     "Houston": (29.73, -95.27),
     "Mobile": (30.71, -88.04),
@@ -172,21 +176,49 @@ if map_df.empty:
     st.stop()
 
 # -------------------------
-# Create arcs
+# Great-circle arc generator
 # -------------------------
 
-def create_arc(p1, p2, steps=50):
-    lat1, lon1 = p1
-    lat2, lon2 = p2
-    lats = np.linspace(lat1, lat2, steps)
-    lons = np.linspace(lon1, lon2, steps)
-    return [[lons[i], lats[i] + np.sin(np.pi * i / (steps - 1)) * 3] for i in range(steps)]
+def great_circle_arc(p1, p2, steps=100):
+    lat1, lon1 = map(math.radians, p1)
+    lat2, lon2 = map(math.radians, p2)
+
+    d = 2 * math.asin(
+        math.sqrt(
+            math.sin((lat2 - lat1) / 2)**2 +
+            math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2)**2
+        )
+    )
+
+    if d == 0:
+        return [[math.degrees(lon1), math.degrees(lat1)]]
+
+    arc = []
+    for i in range(steps):
+        f = i / (steps - 1)
+        A = math.sin((1 - f) * d) / math.sin(d)
+        B = math.sin(f * d) / math.sin(d)
+
+        x = A * math.cos(lat1) * math.cos(lon1) + B * math.cos(lat2) * math.cos(lon2)
+        y = A * math.cos(lat1) * math.sin(lon1) + B * math.cos(lat2) * math.sin(lon2)
+        z = A * math.sin(lat1) + B * math.sin(lat2)
+
+        lat = math.atan2(z, math.sqrt(x * x + y * y))
+        lon = math.atan2(y, x)
+
+        arc.append([math.degrees(lon), math.degrees(lat)])
+
+    return arc
+
+# -------------------------
+# Build route paths
+# -------------------------
 
 paths = []
 for i in range(len(map_df) - 1):
     p1 = (map_df.iloc[i]["lat"], map_df.iloc[i]["lon"])
     p2 = (map_df.iloc[i+1]["lat"], map_df.iloc[i+1]["lon"])
-    paths.append({"path": create_arc(p1, p2)})
+    paths.append({"path": great_circle_arc(p1, p2)})
 
 # -------------------------
 # Satellite map layer
@@ -235,6 +267,3 @@ deck = pdk.Deck(
 
 st.subheader("🌍 Ship Route Map")
 st.pydeck_chart(deck)
-
-
-
