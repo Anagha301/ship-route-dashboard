@@ -3,6 +3,7 @@ import pandas as pd
 import pydeck as pdk
 import numpy as np
 
+pdk.settings.mapbox_api_key = "YOUR_MAPBOX_TOKEN"
 st.set_page_config(layout="wide")
 st.title("🚢 Global Ship Route Dashboard")
 
@@ -318,3 +319,4 @@ deck = pdk.Deck(
 
 st.subheader("🌍 Ship Route Map")
 st.pydeck_chart(deck)
+
