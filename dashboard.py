@@ -1,14 +1,15 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
+import numpy as np
 
 st.set_page_config(layout="wide")
 
-st.title("🚢 Ship Route Dashboard")
+st.title("🚢 Global Ship Route Dashboard")
 
-# ----------------------------
-# Load data
-# ----------------------------
+# -------------------------
+# Load Data
+# -------------------------
 
 df = pd.read_excel("ships.xlsx")
 
@@ -17,9 +18,9 @@ df = df.dropna(subset=["Arrival"])
 
 df["Country"] = df["Country"].astype(str).str.strip()
 
-# ----------------------------
+# -------------------------
 # Ship selector
-# ----------------------------
+# -------------------------
 
 ship = st.sidebar.selectbox(
     "Select Ship",
@@ -31,78 +32,99 @@ ship_data = df[df["Ship Name"] == ship].sort_values("Arrival")
 st.subheader("Voyage Timeline")
 st.dataframe(ship_data)
 
-# ----------------------------
-# Country coordinate database
-# ----------------------------
+# -------------------------
+# Country Coordinates
+# (stable for cloud)
+# -------------------------
 
 country_coords = {
-    "USA": (37.0902, -95.7129),
-    "United States": (37.0902, -95.7129),
-    "Brazil": (-14.2350, -51.9253),
-    "Argentina": (-38.4161, -63.6167),
-    "Uruguay": (-32.5228, -55.7658),
-    "Colombia": (4.5709, -74.2973),
-    "Namibia": (-22.9576, 18.4904),
-    "Australia": (-25.2744, 133.7751),
-    "Singapore": (1.3521, 103.8198),
-    "Malaysia": (4.2105, 101.9758)
+    "USA": (37.09, -95.71),
+    "United States": (37.09, -95.71),
+    "Brazil": (-14.23, -51.92),
+    "Argentina": (-38.41, -63.61),
+    "Uruguay": (-32.52, -55.76),
+    "Colombia": (4.57, -74.29),
+    "Namibia": (-22.95, 18.49),
+    "Australia": (-25.27, 133.77),
+    "Singapore": (1.35, 103.82),
+    "Malaysia": (4.21, 101.97)
 }
 
 coords = []
 
 for country in ship_data["Country"]:
-
     if country in country_coords:
-
         lat, lon = country_coords[country]
-
-        coords.append({
-            "country": country,
-            "lat": lat,
-            "lon": lon
-        })
+        coords.append({"country": country, "lat": lat, "lon": lon})
 
 map_df = pd.DataFrame(coords)
 
-# ----------------------------
-# Map
-# ----------------------------
+# -------------------------
+# Create curved route lines
+# -------------------------
 
-if not map_df.empty:
+def create_arc(p1, p2, steps=30):
 
-    ports = pdk.Layer(
-        "ScatterplotLayer",
-        data=map_df,
-        get_position='[lon, lat]',
-        get_color='[255,0,0]',
-        get_radius=70000
-    )
+    lat1, lon1 = p1
+    lat2, lon2 = p2
 
-    route = pdk.Layer(
-        "PathLayer",
-        data=[{
-            "path": map_df[["lon","lat"]].values.tolist()
-        }],
-        get_path="path",
-        get_color="[0,0,255]",
-        width_scale=20,
-        width_min_pixels=4
-    )
+    lats = np.linspace(lat1, lat2, steps)
+    lons = np.linspace(lon1, lon2, steps)
 
-    view = pdk.ViewState(
-        latitude=map_df["lat"].mean(),
-        longitude=map_df["lon"].mean(),
-        zoom=2
-    )
+    arc = []
 
-    deck = pdk.Deck(
-        layers=[route, ports],
-        initial_view_state=view,
-        tooltip={"text": "{country}"}
-    )
+    for i in range(steps):
+        height = np.sin(np.pi * i / (steps-1)) * 5
+        arc.append([lons[i], lats[i] + height])
 
-    st.subheader("🌍 Ship Route Map")
-    st.pydeck_chart(deck)
+    return arc
 
-else:
-    st.warning("Countries not found in coordinate list.")
+
+paths = []
+
+for i in range(len(map_df) - 1):
+
+    p1 = (map_df.iloc[i]["lat"], map_df.iloc[i]["lon"])
+    p2 = (map_df.iloc[i+1]["lat"], map_df.iloc[i+1]["lon"])
+
+    paths.append({
+        "path": create_arc(p1, p2)
+    })
+
+# -------------------------
+# Map Layers
+# -------------------------
+
+ports = pdk.Layer(
+    "ScatterplotLayer",
+    data=map_df,
+    get_position='[lon, lat]',
+    get_color='[255, 50, 50]',
+    get_radius=90000,
+)
+
+routes = pdk.Layer(
+    "PathLayer",
+    data=paths,
+    get_path="path",
+    get_color="[0, 120, 255]",
+    width_scale=20,
+    width_min_pixels=4,
+)
+
+view = pdk.ViewState(
+    latitude=map_df["lat"].mean(),
+    longitude=map_df["lon"].mean(),
+    zoom=2,
+    pitch=30,
+)
+
+deck = pdk.Deck(
+    layers=[routes, ports],
+    initial_view_state=view,
+    map_style="mapbox://styles/mapbox/light-v9",
+    tooltip={"text": "{country}"}
+)
+
+st.subheader("🌍 Ship Route Map")
+st.pydeck_chart(deck)
