@@ -4,16 +4,15 @@ import plotly.express as px
 
 st.set_page_config(layout="wide")
 
-# -------------------------
+# -----------------------
 # LOAD DATA
-# -------------------------
+# -----------------------
 
 @st.cache_data
 def load_data():
 
     df = pd.read_excel("ships.xlsx", sheet_name="Sheet1")
 
-    # Force correct column names
     df = df.iloc[:,0:3]
     df.columns = ["Ship Name","Country","Visits"]
 
@@ -21,12 +20,15 @@ def load_data():
 
 df = load_data()
 
+# Convert visits to numbers
+df["Visits"] = pd.to_numeric(df["Visits"], errors="coerce")
+
 # Remove empty rows
 df = df.dropna(subset=["Country"])
 
-# -------------------------
+# -----------------------
 # COUNTRY COORDINATES
-# -------------------------
+# -----------------------
 
 coords = {
 "USA":(37,-95),
@@ -75,9 +77,9 @@ df["lon"] = df["Country"].map(lambda x: coords.get(x,(None,None))[1])
 
 df = df.dropna(subset=["lat","lon"])
 
-# -------------------------
-# SIDEBAR FILTER
-# -------------------------
+# -----------------------
+# FILTER
+# -----------------------
 
 st.sidebar.title("Filters")
 
@@ -89,9 +91,9 @@ ships = st.sidebar.multiselect(
 
 filtered = df[df["Ship Name"].isin(ships)]
 
-# -------------------------
+# -----------------------
 # MAP
-# -------------------------
+# -----------------------
 
 st.title("🌍 Ship Country Visits")
 
@@ -108,17 +110,17 @@ fig.update_layout(height=650)
 
 st.plotly_chart(fig, use_container_width=True)
 
-# -------------------------
+# -----------------------
 # TABLE
-# -------------------------
+# -----------------------
 
 st.header("Ship Visits")
 
 st.dataframe(filtered)
 
-# -------------------------
+# -----------------------
 # SUMMARY
-# -------------------------
+# -----------------------
 
 st.header("Ship Summary")
 
