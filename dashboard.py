@@ -1,125 +1,142 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 
-st.set_page_config(page_title="Fleet Shipping Dashboard", layout="wide")
+st.set_page_config(page_title="Ship Movement Dashboard", layout="wide")
 
-st.title("🚢 Global Fleet Shipping Analysis")
+st.title("🚢 Ship Movement Interactive World Map")
 
-uploaded_file = st.file_uploader("Upload ship Excel file", type=["xlsx"])
+# -----------------------------
+# LOAD DATA
+# -----------------------------
+
+uploaded_file = st.file_uploader("Upload ships.xlsx", type=["xlsx"])
 
 if uploaded_file:
 
     df = pd.read_excel(uploaded_file)
+
     df.columns = df.columns.str.strip()
 
+    # Handle missing values
+    df["Country"] = df["Country"].fillna("Unknown")
+    df["Arrival"] = pd.to_datetime(df["Arrival"], errors="coerce")
+    df["Departure"] = pd.to_datetime(df["Departure"], errors="coerce")
+
     # -----------------------------
-    # PORT COORDINATE DATABASE
-    # (add ports if needed)
+    # SIDEBAR FILTERS
     # -----------------------------
 
-    port_coords = {
-        "Rotterdam": (51.9244, 4.4777),
-        "Hamburg": (53.5511, 9.9937),
-        "New York": (40.7128, -74.0060),
-        "Singapore": (1.3521, 103.8198),
-        "Cartagena": (10.3910, -75.4794),
-        "Manzanillo": (19.1138, -104.3385),
-        "Fort Lauderdale": (26.1224, -80.1373),
-        "Port Everglades": (26.0903, -80.1164),
-        "Panama": (8.9824, -79.5199)
-    }
+    st.sidebar.header("Filters")
 
-    df["Latitude"] = df["Port"].map(lambda x: port_coords.get(x,(None,None))[0])
-    df["Longitude"] = df["Port"].map(lambda x: port_coords.get(x,(None,None))[1])
+    ships = st.sidebar.multiselect(
+        "Filter by Ship",
+        options=df["Ship Name"].unique(),
+        default=df["Ship Name"].unique()
+    )
+
+    df = df[df["Ship Name"].isin(ships)]
+
+    date_range = st.sidebar.date_input(
+        "Filter by Arrival Date",
+        []
+    )
+
+    if len(date_range) == 2:
+        df = df[(df["Arrival"] >= pd.to_datetime(date_range[0])) &
+                (df["Arrival"] <= pd.to_datetime(date_range[1]))]
+
+    # -----------------------------
+    # GEOCODING PORTS
+    # -----------------------------
+
+    geolocator = Nominatim(user_agent="ship_map")
+    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+
+    ports = df[["Port","Country"]].drop_duplicates()
+
+    if "Latitude" not in ports.columns:
+
+        coords = []
+
+        for _, row in ports.iterrows():
+
+            location = geocode(f"{row['Port']}, {row['Country']}")
+
+            if location:
+                coords.append((location.latitude, location.longitude))
+            else:
+                coords.append((None,None))
+
+        ports["Latitude"] = [c[0] for c in coords]
+        ports["Longitude"] = [c[1] for c in coords]
+
+    df = df.merge(ports, on=["Port","Country"], how="left")
 
     df = df.dropna(subset=["Latitude","Longitude"])
 
     # -----------------------------
-    # METRICS
-    # -----------------------------
-
-    c1,c2,c3 = st.columns(3)
-
-    c1.metric("Total Ships", df["Ship Name"].nunique())
-    c2.metric("Total Ports", df["Port"].nunique())
-    c3.metric("Total Countries", df["Country"].nunique())
-
-    st.divider()
-
-    # -----------------------------
-    # PORT ACTIVITY
+    # PORT VISIT STATS
     # -----------------------------
 
     port_stats = df.groupby(
         ["Port","Country","Latitude","Longitude"]
     ).agg(
-        Visits=("Ship Name","count"),
-        Ships=("Ship Name",lambda x: ", ".join(sorted(x.unique())))
+        Visits=("Ship Name","count")
     ).reset_index()
 
-    port_stats = port_stats.sort_values("Visits",ascending=False)
+    # -----------------------------
+    # MAP
+    # -----------------------------
 
-    st.subheader("🌍 Global Port Activity Map")
+    st.subheader("🌍 Global Port Activity")
 
-    fig = px.scatter_mapbox(
+    fig = px.scatter_geo(
         port_stats,
         lat="Latitude",
         lon="Longitude",
         size="Visits",
-        color="Visits",
         hover_name="Port",
-        hover_data={
-            "Country":True,
-            "Visits":True,
-            "Ships":True
-        },
-        zoom=1,
-        height=650
+        hover_data={"Country":True,"Visits":True},
+        projection="natural earth"
     )
 
-    fig.update_layout(mapbox_style="carto-positron")
-
-    st.plotly_chart(fig,use_container_width=True)
-
-    st.divider()
+    st.plotly_chart(fig, use_container_width=True)
 
     # -----------------------------
-    # SHIP → PORT ANALYSIS
+    # PORT DETAIL TABLE
     # -----------------------------
 
-    st.subheader("🚢 Ship Port Visits")
+    st.subheader("⚓ Port Visit Details")
 
-    ship_ports = df.groupby(["Ship Name","Port"]).size().reset_index(name="Visits")
+    selected_port = st.selectbox(
+        "Select Port",
+        port_stats["Port"].unique()
+    )
 
-    ship_ports = ship_ports.sort_values(["Ship Name","Visits"],ascending=[True,False])
+    port_detail = df[df["Port"] == selected_port]
 
-    st.dataframe(ship_ports,use_container_width=True)
+    port_ship_counts = port_detail.groupby("Ship Name").size().reset_index(name="Visits")
 
-    st.divider()
-
-    # -----------------------------
-    # SHIP → COUNTRY ANALYSIS
-    # -----------------------------
-
-    st.subheader("🌍 Ship Country Visits")
-
-    ship_countries = df.groupby(["Ship Name","Country"]).size().reset_index(name="Visits")
-
-    ship_countries = ship_countries.sort_values(["Ship Name","Visits"],ascending=[True,False])
-
-    st.dataframe(ship_countries,use_container_width=True)
-
-    st.divider()
+    st.dataframe(port_ship_counts)
 
     # -----------------------------
-    # PORT SUMMARY
+    # SHIP OVERVIEW TABLE
     # -----------------------------
 
-    st.subheader("📊 Port Visit Summary")
+    st.subheader("🚢 Ship Overview")
 
-    st.dataframe(port_stats,use_container_width=True)
+    ship_summary = df.groupby("Ship Name").agg(
+        Total_Visits=("Port","count"),
+        Unique_Ports=("Port","nunique"),
+        First_Seen=("Arrival","min"),
+        Last_Seen=("Arrival","max")
+    ).reset_index()
+
+    st.dataframe(ship_summary)
 
 else:
 
-    st.info("Upload your fleet Excel dataset to start.")
+    st.info("Upload ships.xlsx to begin analysis.")
