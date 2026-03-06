@@ -10,33 +10,18 @@ st.set_page_config(layout="wide")
 
 @st.cache_data
 def load_data():
-    
+
     df = pd.read_excel("ships.xlsx", sheet_name="Sheet1")
 
-    # clean column names
-    df.columns = df.columns.str.strip()
-
-    # fix possible column name variations
-    df = df.rename(columns={
-        "Ships Name": "Ship Name",
-        "country": "Country"
-    })
+    # Force correct column names
+    df = df.iloc[:,0:3]
+    df.columns = ["Ship Name","Country","Visits"]
 
     return df
 
-
 df = load_data()
 
-# -------------------------
-# DEBUG (remove later)
-# -------------------------
-
-st.write("Detected columns:", df.columns)
-
-# -------------------------
-# CLEAN DATA
-# -------------------------
-
+# Remove empty rows
 df = df.dropna(subset=["Country"])
 
 # -------------------------
@@ -85,7 +70,6 @@ coords = {
 "UAE":(23.42,53.84)
 }
 
-# assign coordinates
 df["lat"] = df["Country"].map(lambda x: coords.get(x,(None,None))[0])
 df["lon"] = df["Country"].map(lambda x: coords.get(x,(None,None))[1])
 
@@ -125,24 +109,19 @@ fig.update_layout(height=650)
 st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------
-# DATA TABLE
+# TABLE
 # -------------------------
 
-st.header("Ship Visit Data")
+st.header("Ship Visits")
 
-st.dataframe(filtered, use_container_width=True)
+st.dataframe(filtered)
 
 # -------------------------
-# SHIP SUMMARY
+# SUMMARY
 # -------------------------
 
 st.header("Ship Summary")
 
-summary = (
-    filtered.groupby("Ship Name")["Visits"]
-    .sum()
-    .reset_index()
-    .sort_values("Visits", ascending=False)
-)
+summary = filtered.groupby("Ship Name")["Visits"].sum().reset_index()
 
-st.dataframe(summary, use_container_width=True)
+st.dataframe(summary)
