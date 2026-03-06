@@ -4,24 +4,44 @@ import plotly.express as px
 
 st.set_page_config(layout="wide")
 
-# -----------------------------
-# Load Data
-# -----------------------------
+# -------------------------
+# LOAD DATA
+# -------------------------
 
-df = pd.read_excel("ships.xlsx", sheet_name="Sheet1")
+@st.cache_data
+def load_data():
+    
+    df = pd.read_excel("ships.xlsx", sheet_name="Sheet1")
 
-# clean column names
-df.columns = df.columns.str.strip()
+    # clean column names
+    df.columns = df.columns.str.strip()
 
-# debug check (remove later if you want)
+    # fix possible column name variations
+    df = df.rename(columns={
+        "Ships Name": "Ship Name",
+        "country": "Country"
+    })
+
+    return df
+
+
+df = load_data()
+
+# -------------------------
+# DEBUG (remove later)
+# -------------------------
+
 st.write("Detected columns:", df.columns)
 
-# remove empty rows
-df = df[df["Country"].notna()]
+# -------------------------
+# CLEAN DATA
+# -------------------------
 
-# -----------------------------
-# Country Coordinates
-# -----------------------------
+df = df.dropna(subset=["Country"])
+
+# -------------------------
+# COUNTRY COORDINATES
+# -------------------------
 
 coords = {
 "USA":(37,-95),
@@ -60,19 +80,20 @@ coords = {
 "Canada":(56.13,-106.34),
 "Japan":(36.20,138.25),
 "Peru":(-9.19,-75.02),
-"Guatemala":(15.78,-90.23)
+"Guatemala":(15.78,-90.23),
+"Bahamas":(25.03,-77.40),
+"UAE":(23.42,53.84)
 }
 
 # assign coordinates
 df["lat"] = df["Country"].map(lambda x: coords.get(x,(None,None))[0])
 df["lon"] = df["Country"].map(lambda x: coords.get(x,(None,None))[1])
 
-# remove countries without coordinates
 df = df.dropna(subset=["lat","lon"])
 
-# -----------------------------
-# Sidebar Filters
-# -----------------------------
+# -------------------------
+# SIDEBAR FILTER
+# -------------------------
 
 st.sidebar.title("Filters")
 
@@ -84,9 +105,9 @@ ships = st.sidebar.multiselect(
 
 filtered = df[df["Ship Name"].isin(ships)]
 
-# -----------------------------
-# Map
-# -----------------------------
+# -------------------------
+# MAP
+# -------------------------
 
 st.title("🌍 Ship Country Visits")
 
@@ -103,17 +124,17 @@ fig.update_layout(height=650)
 
 st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------
-# Data Table
-# -----------------------------
+# -------------------------
+# DATA TABLE
+# -------------------------
 
-st.header("Ship Visits Data")
+st.header("Ship Visit Data")
 
 st.dataframe(filtered, use_container_width=True)
 
-# -----------------------------
-# Ship Summary
-# -----------------------------
+# -------------------------
+# SHIP SUMMARY
+# -------------------------
 
 st.header("Ship Summary")
 
