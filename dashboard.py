@@ -1,115 +1,116 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import pydeck as pdk
 
-st.set_page_config(page_title="Fleet Port Activity Dashboard", layout="wide")
+st.set_page_config(page_title="Global Fleet Dashboard", layout="wide")
 
-st.title("🚢 Fleet Port Activity Dashboard")
+st.title("🚢 Global Fleet Port Activity Dashboard")
 
-uploaded_file = st.file_uploader("Upload Ship Data Excel", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload Ship Excel Data", type=["xlsx"])
 
 if uploaded_file:
 
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.str.strip()
 
-    # ---------------------------------
-    # PORT COORDINATE DATABASE
-    # ---------------------------------
+    required = ["Ship Name", "Port", "Country"]
+    for col in required:
+        if col not in df.columns:
+            st.error(f"Missing column: {col}")
+            st.stop()
 
-    port_coords = {
-        "Cartagena": (10.391, -75.479),
-        "New York": (40.7128, -74.0060),
-        "Rotterdam": (51.9244, 4.4777),
-        "Singapore": (1.3521, 103.8198),
-        "Hamburg": (53.5511, 9.9937),
-        "Manzanillo": (19.1138, -104.3385),
-        "Fort Lauderdale": (26.1224, -80.1373),
-        "Port Everglades": (26.0903, -80.1164),
-        "USNWK": (40.6895, -74.1745),
-        "Panama": (8.9824, -79.5199)
-    }
+    # -----------------------------
+    # BASIC METRICS
+    # -----------------------------
 
-    # Add coordinates
-    df["Latitude"] = df["Port"].map(lambda x: port_coords.get(x, (None,None))[0])
-    df["Longitude"] = df["Port"].map(lambda x: port_coords.get(x, (None,None))[1])
+    c1, c2, c3 = st.columns(3)
 
-    df = df.dropna(subset=["Latitude","Longitude"])
+    c1.metric("Total Ships", df["Ship Name"].nunique())
+    c2.metric("Total Ports", df["Port"].nunique())
+    c3.metric("Total Countries", df["Country"].nunique())
 
-    # ---------------------------------
+    st.divider()
+
+    # -----------------------------
     # PORT VISITS
-    # ---------------------------------
+    # -----------------------------
 
-    port_stats = df.groupby(
-        ["Port","Latitude","Longitude"]
-    ).agg(
+    port_stats = df.groupby(["Port","Country"]).agg(
         Visits=("Ship Name","count"),
         Ships=("Ship Name", lambda x: ", ".join(sorted(x.unique())))
     ).reset_index()
 
     port_stats = port_stats.sort_values("Visits", ascending=False)
 
-    # ---------------------------------
-    # DASHBOARD METRICS
-    # ---------------------------------
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric("Total Ships", df["Ship Name"].nunique())
-    c2.metric("Total Ports", df["Port"].nunique())
-    c3.metric("Total Visits", len(df))
-
-    st.divider()
-
-    # ---------------------------------
-    # MAP
-    # ---------------------------------
-
-    st.subheader("🌍 Port Activity Map")
-
-    fig = px.scatter_mapbox(
-        port_stats,
-        lat="Latitude",
-        lon="Longitude",
-        size="Visits",
-        color="Visits",
-        hover_name="Port",
-        hover_data={
-            "Visits":True,
-            "Ships":True
-        },
-        zoom=1,
-        height=600
-    )
-
-    fig.update_layout(mapbox_style="carto-positron")
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.divider()
-
-    # ---------------------------------
-    # PORT VISITS TABLE
-    # ---------------------------------
-
     st.subheader("📊 Port Visit Summary")
-
     st.dataframe(port_stats)
 
     st.divider()
 
-    # ---------------------------------
-    # SHIPS PER PORT TABLE
-    # ---------------------------------
+    # -----------------------------
+    # COUNTRY VISITS
+    # -----------------------------
 
-    st.subheader("🚢 Ships Visiting Each Port")
+    country_stats = df.groupby("Country").agg(
+        Visits=("Ship Name","count"),
+        Ships=("Ship Name", lambda x: ", ".join(sorted(x.unique())))
+    ).reset_index().sort_values("Visits", ascending=False)
 
-    ships_per_port = df.groupby("Port")["Ship Name"].apply(
-        lambda x: ", ".join(sorted(x.unique()))
-    ).reset_index()
+    st.subheader("🌍 Country Activity")
+    st.dataframe(country_stats)
 
-    st.dataframe(ships_per_port)
+    st.divider()
+
+    # -----------------------------
+    # SHIP ACTIVITY
+    # -----------------------------
+
+    ship_stats = df.groupby("Ship Name").agg(
+        Ports_Visited=("Port","nunique"),
+        Countries_Visited=("Country","nunique"),
+        Total_Visits=("Port","count")
+    ).reset_index().sort_values("Total_Visits", ascending=False)
+
+    st.subheader("🚢 Ship Activity")
+    st.dataframe(ship_stats)
+
+    st.divider()
+
+    # -----------------------------
+    # MAP DATA
+    # -----------------------------
+
+    # simple approximate coordinates by country
+    country_coords = {
+        "USA":[37,-95],
+        "Netherlands":[52,5],
+        "Singapore":[1.35,103.8],
+        "Panama":[8.5,-80],
+        "Colombia":[4.5,-74],
+        "Germany":[51,10]
+    }
+
+    port_stats["lat"] = port_stats["Country"].map(lambda x: country_coords.get(x,[None,None])[0])
+    port_stats["lon"] = port_stats["Country"].map(lambda x: country_coords.get(x,[None,None])[1])
+
+    map_data = port_stats.dropna(subset=["lat","lon"])
+
+    st.subheader("🌍 Global Port Activity Map")
+
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_data,
+        get_position='[lon, lat]',
+        get_radius="Visits * 50000",
+        pickable=True
+    )
+
+    view_state = pdk.ViewState(latitude=20, longitude=0, zoom=1)
+
+    deck = pdk.Deck(layers=[layer], initial_view_state=view_state)
+
+    st.pydeck_chart(deck)
 
 else:
 
-    st.info("Upload your Excel file to start the analysis.")
+    st.info("Upload your Excel fleet dataset.")
