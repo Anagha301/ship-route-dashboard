@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Fleet Port Dashboard", layout="wide")
+st.set_page_config(page_title="Fleet Shipping Dashboard", layout="wide")
 
-st.title("🚢 Global Fleet Port Activity")
+st.title("🚢 Global Fleet Shipping Analysis")
 
-uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload ship Excel file", type=["xlsx"])
 
 if uploaded_file:
 
@@ -14,88 +14,112 @@ if uploaded_file:
     df.columns = df.columns.str.strip()
 
     # -----------------------------
-    # BASIC METRICS
+    # PORT COORDINATE DATABASE
+    # (add ports if needed)
     # -----------------------------
 
-    col1, col2, col3 = st.columns(3)
+    port_coords = {
+        "Rotterdam": (51.9244, 4.4777),
+        "Hamburg": (53.5511, 9.9937),
+        "New York": (40.7128, -74.0060),
+        "Singapore": (1.3521, 103.8198),
+        "Cartagena": (10.3910, -75.4794),
+        "Manzanillo": (19.1138, -104.3385),
+        "Fort Lauderdale": (26.1224, -80.1373),
+        "Port Everglades": (26.0903, -80.1164),
+        "Panama": (8.9824, -79.5199)
+    }
 
-    col1.metric("Total Ships", df["Ship Name"].nunique())
-    col2.metric("Total Ports", df["Port"].nunique())
-    col3.metric("Total Countries", df["Country"].nunique())
+    df["Latitude"] = df["Port"].map(lambda x: port_coords.get(x,(None,None))[0])
+    df["Longitude"] = df["Port"].map(lambda x: port_coords.get(x,(None,None))[1])
+
+    df = df.dropna(subset=["Latitude","Longitude"])
+
+    # -----------------------------
+    # METRICS
+    # -----------------------------
+
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric("Total Ships", df["Ship Name"].nunique())
+    c2.metric("Total Ports", df["Port"].nunique())
+    c3.metric("Total Countries", df["Country"].nunique())
 
     st.divider()
 
     # -----------------------------
-    # PORT VISITS
+    # PORT ACTIVITY
     # -----------------------------
 
-    port_stats = df.groupby(["Port","Country"]).agg(
+    port_stats = df.groupby(
+        ["Port","Country","Latitude","Longitude"]
+    ).agg(
         Visits=("Ship Name","count"),
-        Ships=("Ship Name", lambda x: ", ".join(sorted(x.unique())))
+        Ships=("Ship Name",lambda x: ", ".join(sorted(x.unique())))
     ).reset_index()
 
-    port_stats = port_stats.sort_values("Visits", ascending=False)
+    port_stats = port_stats.sort_values("Visits",ascending=False)
 
-    # -----------------------------
-    # MAP
-    # -----------------------------
+    st.subheader("🌍 Global Port Activity Map")
 
-    st.subheader("🌍 Port Activity Map")
-
-    fig = px.scatter_geo(
+    fig = px.scatter_mapbox(
         port_stats,
-        locations="Country",
-        locationmode="country names",
+        lat="Latitude",
+        lon="Longitude",
         size="Visits",
+        color="Visits",
         hover_name="Port",
         hover_data={
+            "Country":True,
             "Visits":True,
             "Ships":True
         },
-        projection="natural earth"
+        zoom=1,
+        height=650
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(mapbox_style="carto-positron")
+
+    st.plotly_chart(fig,use_container_width=True)
 
     st.divider()
 
     # -----------------------------
-    # PORT TABLE
+    # SHIP → PORT ANALYSIS
     # -----------------------------
 
-    st.subheader("📊 Port Visits")
+    st.subheader("🚢 Ship Port Visits")
 
-    st.dataframe(port_stats)
+    ship_ports = df.groupby(["Ship Name","Port"]).size().reset_index(name="Visits")
+
+    ship_ports = ship_ports.sort_values(["Ship Name","Visits"],ascending=[True,False])
+
+    st.dataframe(ship_ports,use_container_width=True)
 
     st.divider()
 
     # -----------------------------
-    # SHIPS PER PORT
+    # SHIP → COUNTRY ANALYSIS
     # -----------------------------
 
-    st.subheader("🚢 Ships Visiting Each Port")
+    st.subheader("🌍 Ship Country Visits")
 
-    ships_per_port = df.groupby("Port")["Ship Name"].apply(
-        lambda x: ", ".join(sorted(x.unique()))
-    ).reset_index()
+    ship_countries = df.groupby(["Ship Name","Country"]).size().reset_index(name="Visits")
 
-    st.dataframe(ships_per_port)
+    ship_countries = ship_countries.sort_values(["Ship Name","Visits"],ascending=[True,False])
+
+    st.dataframe(ship_countries,use_container_width=True)
 
     st.divider()
 
     # -----------------------------
-    # COUNTRY ACTIVITY
+    # PORT SUMMARY
     # -----------------------------
 
-    st.subheader("🌍 Country Activity")
+    st.subheader("📊 Port Visit Summary")
 
-    country_stats = df.groupby("Country").agg(
-        Visits=("Ship Name","count"),
-        Ships=("Ship Name", lambda x: ", ".join(sorted(x.unique())))
-    ).reset_index()
-
-    st.dataframe(country_stats)
+    st.dataframe(port_stats,use_container_width=True)
 
 else:
 
-    st.info("Upload your fleet Excel dataset.")
+    st.info("Upload your fleet Excel dataset to start.")
