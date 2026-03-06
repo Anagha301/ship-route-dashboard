@@ -12,7 +12,7 @@ uploaded_file = st.file_uploader("Upload ships.xlsx", type=["xlsx"])
 
 if uploaded_file:
 
-    df = pd.read_excel(uploaded_file, sheet_name="Sheet2")
+    df = pd.read_excel(uploaded_file, sheet_name="Sheet1")
 
     # Clean column names
     df.columns = df.columns.str.strip()
@@ -88,4 +88,5 @@ if uploaded_file:
 else:
 
     st.info("Upload ships.xlsx to begin.")
+
 
