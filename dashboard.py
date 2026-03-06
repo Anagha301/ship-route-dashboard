@@ -8,10 +8,13 @@ st.set_page_config(layout="wide")
 # Load Data
 # -----------------------------
 
-df = pd.read_excel("ships.xlsx")
+df = pd.read_excel("ships.xlsx", sheet_name="Sheet1")
 
 # clean column names
 df.columns = df.columns.str.strip()
+
+# debug check (remove later if you want)
+st.write("Detected columns:", df.columns)
 
 # remove empty rows
 df = df[df["Country"].notna()]
@@ -57,8 +60,7 @@ coords = {
 "Canada":(56.13,-106.34),
 "Japan":(36.20,138.25),
 "Peru":(-9.19,-75.02),
-"Guatemala":(15.78,-90.23),
-"Brazil":(-14.23,-51.92)
+"Guatemala":(15.78,-90.23)
 }
 
 # assign coordinates
@@ -66,7 +68,7 @@ df["lat"] = df["Country"].map(lambda x: coords.get(x,(None,None))[0])
 df["lon"] = df["Country"].map(lambda x: coords.get(x,(None,None))[1])
 
 # remove countries without coordinates
-df = df.dropna(subset=["lat"])
+df = df.dropna(subset=["lat","lon"])
 
 # -----------------------------
 # Sidebar Filters
@@ -102,7 +104,7 @@ fig.update_layout(height=650)
 st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
-# Table
+# Data Table
 # -----------------------------
 
 st.header("Ship Visits Data")
@@ -115,8 +117,11 @@ st.dataframe(filtered, use_container_width=True)
 
 st.header("Ship Summary")
 
-summary = filtered.groupby("Ship Name")["Visits"].sum().reset_index()
-
-summary = summary.sort_values("Visits", ascending=False)
+summary = (
+    filtered.groupby("Ship Name")["Visits"]
+    .sum()
+    .reset_index()
+    .sort_values("Visits", ascending=False)
+)
 
 st.dataframe(summary, use_container_width=True)
