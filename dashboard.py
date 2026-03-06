@@ -2,91 +2,177 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
 
-st.set_page_config(page_title="Ship Movement Dashboard", layout="wide")
+st.set_page_config(layout="wide")
 
-st.title("🚢 Global Ship Movement Dashboard")
-
-uploaded_file = st.file_uploader("Upload ships.xlsx", type=["xlsx"])
-
-if uploaded_file:
-
-    df = pd.read_excel(uploaded_file, sheet_name="Sheet1")
-
-    # Clean column names
-    df.columns = df.columns.str.strip()
-
-    st.write("Detected columns:", df.columns)
-
-    # Rename possible column variations
-    column_map = {
-        "Country Name": "Country",
-        "Country/Region": "Country",
-        "Port Name": "Port"
-    }
-
-    df = df.rename(columns=column_map)
-
-    # If country still missing create one
-    if "Country" not in df.columns:
-        df["Country"] = "Unknown"
+# -----------------------------
+# Load Data
+# -----------------------------
+@st.cache_data
+def load_data():
+    df = pd.read_excel("ships.xlsx", sheet_name="Sheet1")
 
     df["Country"] = df["Country"].fillna("Unknown")
 
-    # Convert dates
     df["Arrival"] = pd.to_datetime(df["Arrival"], errors="coerce")
     df["Departure"] = pd.to_datetime(df["Departure"], errors="coerce")
 
-    # -----------------------------
-    # Geocode ports
-    # -----------------------------
+    df = df.dropna(subset=["Port"])
 
-    geolocator = Nominatim(user_agent="ships")
-    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
-
-    ports = df[["Port","Country"]].drop_duplicates()
-
-    coords = []
-
-    for _, row in ports.iterrows():
-        location = geocode(f"{row['Port']}, {row['Country']}")
-        if location:
-            coords.append((location.latitude, location.longitude))
-        else:
-            coords.append((None, None))
-
-    ports["lat"] = [c[0] for c in coords]
-    ports["lon"] = [c[1] for c in coords]
-
-    df = df.merge(ports, on=["Port","Country"])
-
-    df = df.dropna(subset=["lat","lon"])
-
-    # -----------------------------
-    # Port stats
-    # -----------------------------
-
-    port_stats = df.groupby(
-        ["Port","Country","lat","lon"]
-    ).size().reset_index(name="Visits")
-
-    st.subheader("🌍 Port Activity Map")
-
-    fig = px.scatter_geo(
-        port_stats,
-        lat="lat",
-        lon="lon",
-        size="Visits",
-        hover_name="Port",
-        hover_data=["Country","Visits"],
-        projection="natural earth"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-else:
-
-    st.info("Upload ships.xlsx to begin.")
+    return df
 
 
+df = load_data()
+
+# -----------------------------
+# Sidebar Filters
+# -----------------------------
+
+st.sidebar.header("Filters")
+
+ships = st.sidebar.multiselect(
+    "Select Ship",
+    df["Ship Name"].unique(),
+    default=df["Ship Name"].unique()
+)
+
+date_range = st.sidebar.date_input(
+    "Arrival Date Range",
+    [df["Arrival"].min(), df["Arrival"].max()]
+)
+
+filtered = df[
+    (df["Ship Name"].isin(ships)) &
+    (df["Arrival"] >= pd.to_datetime(date_range[0])) &
+    (df["Arrival"] <= pd.to_datetime(date_range[1]))
+]
+
+# -----------------------------
+# Geocode Ports
+# -----------------------------
+
+@st.cache_data
+def get_coordinates(port, country):
+
+    geolocator = Nominatim(user_agent="ship_dashboard")
+
+    try:
+        location = geolocator.geocode(f"{port}, {country}")
+        return location.latitude, location.longitude
+    except:
+        return None, None
+
+
+ports = filtered[["Port", "Country"]].drop_duplicates()
+
+coords = []
+
+for _, row in ports.iterrows():
+
+    lat, lon = get_coordinates(row["Port"], row["Country"])
+
+    coords.append({
+        "Port": row["Port"],
+        "Country": row["Country"],
+        "lat": lat,
+        "lon": lon
+    })
+
+coord_df = pd.DataFrame(coords)
+
+filtered = filtered.merge(coord_df, on=["Port", "Country"], how="left")
+
+filtered = filtered.dropna(subset=["lat", "lon"])
+
+# -----------------------------
+# Port Visit Summary
+# -----------------------------
+
+port_visits = filtered.groupby(
+    ["Port", "Country", "lat", "lon"]
+).agg(
+    Visits=("Ship Name", "count"),
+    Ships=("Ship Name", lambda x: ", ".join(sorted(x.unique())))
+).reset_index()
+
+# -----------------------------
+# MAP
+# -----------------------------
+
+st.title("🌍 Ship Port Activity Map")
+
+fig = px.scatter_geo(
+    port_visits,
+    lat="lat",
+    lon="lon",
+    size="Visits",
+    hover_name="Port",
+    hover_data={
+        "Country": True,
+        "Visits": True,
+        "Ships": True,
+        "lat": False,
+        "lon": False
+    }
+)
+
+fig.update_layout(height=600)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------
+# Port Detail Table
+# -----------------------------
+
+st.header("⚓ Port Details")
+
+selected_port = st.selectbox(
+    "Select Port",
+    port_visits["Port"].unique()
+)
+
+port_table = filtered[filtered["Port"] == selected_port]
+
+ship_visits = port_table.groupby("Ship Name").size().reset_index(name="Visits")
+
+st.dataframe(ship_visits)
+
+# -----------------------------
+# Ship Summary Table
+# -----------------------------
+
+st.header("🚢 Ship Summary")
+
+ship_summary = filtered.groupby("Ship Name").agg(
+    Total_Visits=("Port", "count"),
+    Unique_Ports=("Port", "nunique"),
+    Unique_Countries=("Country", "nunique"),
+    First_Arrival=("Arrival", "min"),
+    Last_Arrival=("Arrival", "max")
+).reset_index()
+
+st.dataframe(ship_summary)
+
+# -----------------------------
+# Ship → Port Table
+# -----------------------------
+
+st.header("Ship → Port Visits")
+
+ship_port = filtered.groupby(
+    ["Ship Name", "Port"]
+).size().reset_index(name="Visits")
+
+st.dataframe(ship_port)
+
+# -----------------------------
+# Ship → Country Table
+# -----------------------------
+
+st.header("Ship → Country Visits")
+
+ship_country = filtered.groupby(
+    ["Ship Name", "Country"]
+).size().reset_index(name="Visits")
+
+st.dataframe(ship_country)
